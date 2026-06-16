@@ -18,10 +18,20 @@ How freshness works:
 """
 
 import re
+import difflib
 import duckdb
 from loader import get_new_vision_df
 
 TABLE_NAME = "new_vision"
+
+# Columns that hold names a user is most likely to mis-spell or abbreviate:
+# partners, people (owners), and lines of business. The fuzzy matcher below
+# searches these to turn "AU merchandise" -> "AU Bank", "madhavi" -> "Madhvi".
+ENTITY_COLUMNS = [
+    "Partner", "Line of Business",
+    "VG SPOC", "Product SPOC", "Tech Lead", "QA SPOC",
+]
+_JUNK_VALUES = {"", "-", "na", "n/a", "tbd"}
 
 # This sheet has ~90 dated "weekly review" columns (e.g. 'Review 9th June',
 # 'Comments 24 March'). They're free-text meeting notes, mostly empty per row.
@@ -135,6 +145,77 @@ def get_schema_text(sample_values: int = 3) -> str:
         ]
 
     return "\n".join(lines)
+
+
+def _tokens(s: str):
+    """Split a string into lowercase word tokens of length >= 2."""
+    return [t for t in re.findall(r"[a-z0-9]+", s.lower()) if len(t) >= 2]
+
+
+def find_entity_candidates(term: str, limit: int = 8):
+    """
+    Return the real tracker values that best match a (possibly misspelled,
+    abbreviated, or partial) term the user typed.
+
+    This is what powers the "did you mean…?" behaviour. It scores every distinct
+    value in the entity columns against the term three ways and keeps the best:
+    (a) whole-string fuzzy similarity (difflib),
+    (b) best token-to-token fuzzy similarity (catches 'madhavi' vs 'madhvi'),
+    (c) an exact shared token (catches 'au' inside 'AU Bank').
+
+    Returns a ranked list of (value, column, score) for matches >= 0.6.
+    """
+    _ensure_table()
+    df = get_new_vision_df()
+
+    term_l = " ".join(term.lower().split())
+    term_tokens = set(_tokens(term_l))
+
+    best = {}  # candidate value -> (sort_key, column, sim) ; sort_key=(coverage, sim)
+    for col in ENTITY_COLUMNS:
+        if col not in df.columns:
+            continue
+        for raw in df[col].astype(str).unique():
+            raw = raw.strip()
+            if raw.lower() in _JUNK_VALUES:
+                continue
+            # A cell may list several people ("Vikas, Rajkumar"); treat the whole
+            # cell AND each split part as separate candidates.
+            parts = {raw} | {
+                p.strip() for p in re.split(r"[,/&]|\band\b", raw) if p.strip()
+            }
+            for cand in parts:
+                cl = " ".join(cand.lower().split())
+                cand_tokens = set(_tokens(cl))
+
+                whole = difflib.SequenceMatcher(None, term_l, cl).ratio()
+                # For each term token, its best fuzzy match against a candidate
+                # token. "coverage" = how many of the user's words matched well —
+                # this is what makes "Madhvi Gupta" (2 words) beat "Anjali Gupta"
+                # (1 word) for the query "madhavi gupta".
+                coverage = 0
+                best_tok = 0.0
+                for tt in term_tokens:
+                    m = max(
+                        (difflib.SequenceMatcher(None, tt, ct).ratio() for ct in cand_tokens),
+                        default=0.0,
+                    )
+                    best_tok = max(best_tok, m)
+                    if m >= 0.8:
+                        coverage += 1
+
+                sim = max(whole, best_tok)
+                key = (coverage, sim)
+                if cand not in best or key > best[cand][0]:
+                    best[cand] = (key, col, sim)
+
+    ranked = sorted(best.items(), key=lambda kv: kv[1][0], reverse=True)
+    # Return (value, column, similarity, coverage); keep only close-enough matches.
+    return [
+        (v, c, round(sim, 2), key[0])
+        for v, (key, c, sim) in ranked
+        if sim >= 0.6
+    ][:limit]
 
 
 # ── Quick test: run `python db.py` to verify DuckDB loads + queries the tab ────

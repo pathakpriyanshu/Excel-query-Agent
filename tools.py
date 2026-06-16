@@ -12,7 +12,7 @@ agent read its own mistake and fix the query on the next turn (self-correction).
 """
 
 from strands import tool
-from db import run_sql, TABLE_NAME
+from db import run_sql, find_entity_candidates, TABLE_NAME
 
 # Safety caps so one query can never flood the model's context with huge output.
 # (Also keeps us under Groq's free-tier tokens-per-minute limit.)
@@ -75,3 +75,47 @@ def query_tracker(sql: str) -> str:
     except Exception as e:
         # Hand the exact error back to the model so it can self-correct.
         return f"ERROR running query: {type(e).__name__}: {e}\nFix the SQL and try again."
+
+
+@tool
+def find_entity(term: str) -> str:
+    """Find the real tracker values that best match a partner, person, or line-of-business the user named.
+
+    Use this whenever the user's wording might be partial, abbreviated, or
+    mis-spelled, OR whenever a query returns 0 rows for a name they mentioned.
+    It maps things like 'AU merchandise' -> 'AU Bank' and 'madhavi' -> 'Madhvi
+    Gupta'. ALWAYS call this before telling the user something "doesn't exist".
+
+    Args:
+        term: the name or phrase the user used (e.g. "AU merchandise", "madhavi").
+
+    Returns:
+        A ranked list of the closest real values and which column each is in, so
+        you can either use the best match (stating your interpretation) or ask
+        the user which one they meant.
+    """
+    matches = find_entity_candidates(term)
+    if not matches:
+        return (
+            f"No close matches for '{term}' in the partner / person / "
+            f"line-of-business columns. It may genuinely not be in the tracker."
+        )
+
+    # matches are (value, column, similarity, coverage), best first.
+    top_val, top_col, top_sim, top_cov = matches[0]
+    second_cov = matches[1][3] if len(matches) > 1 else -1
+
+    # Clear winner: only one match, or the top one matched more of the user's
+    # words than the runner-up. Tell the agent it can use it directly.
+    if len(matches) == 1 or top_cov > second_cov:
+        msg = [f'Best match for "{term}": "{top_val}" (in "{top_col}"). Use this.']
+        if len(matches) > 1:
+            others = ", ".join(f'"{v}"' for v, _, _, _ in matches[1:5])
+            msg.append(f"(Other, weaker possibilities: {others}.)")
+        return "\n".join(msg)
+
+    # Genuine tie -> list the top options so the agent can ask the user.
+    lines = [f'Several equally close matches for "{term}" - ask the user which:']
+    for val, col, score, _cov in matches[:5]:
+        lines.append(f'  - "{val}"  (in "{col}")')
+    return "\n".join(lines)

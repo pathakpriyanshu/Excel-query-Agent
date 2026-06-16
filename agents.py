@@ -15,13 +15,19 @@ reads the result, maybe queries again, then answers. That loop is what lets it
 """
 
 import os
+import litellm
 from dotenv import load_dotenv
 
 from strands import Agent
 from strands.models.litellm import LiteLLMModel
 
+# If a model doesn't support a param we send (e.g. reasoning models reject a
+# custom temperature), drop it instead of erroring. Belt-and-suspenders alongside
+# the explicit handling in build_model().
+litellm.drop_params = True
+
 from prompts import build_system_prompt
-from tools import query_tracker
+from tools import query_tracker, find_entity
 from db import get_schema_text
 
 # override=True so THIS project's .env wins over any machine-wide OS env vars.
@@ -54,6 +60,10 @@ def build_model() -> LiteLLMModel:
         # set OPENAI_BASE_URL in .env only if you truly want a custom endpoint.
         params["api_key"] = os.getenv("OPENAI_API_KEY")
         params["api_base"] = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        # Reasoning-family models (gpt-5*, o1/o3/o4) only allow the default
+        # temperature — sending temperature=0 would 400. Drop it for them.
+        if model_id.startswith(("gpt-5", "o1", "o3", "o4")):
+            params.pop("temperature", None)
     else:  # groq
         # llama-3.3-70b-versatile, not 8b-instant: tool-calling + correct SQL are
         # reasoning tasks. The old project found 8b broke formats and wrote buggy
@@ -80,7 +90,7 @@ def create_agent() -> Agent:
     return Agent(
         model=build_model(),
         system_prompt=system_prompt,
-        tools=[query_tracker],
+        tools=[query_tracker, find_entity],
         # Silence Strands' default token-streaming printout to the server console;
         # Chainlit (or our CLI) handles displaying the answer.
         callback_handler=None,
