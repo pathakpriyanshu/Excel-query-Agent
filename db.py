@@ -17,10 +17,24 @@ How freshness works:
   a ~100-row table takes milliseconds, so this is cheap.
 """
 
+import re
 import duckdb
 from loader import get_new_vision_df
 
 TABLE_NAME = "new_vision"
+
+# This sheet has ~90 dated "weekly review" columns (e.g. 'Review 9th June',
+# 'Comments 24 March'). They're free-text meeting notes, mostly empty per row.
+# Listing all of them in the prompt would bury the ~30 columns that actually
+# matter. We detect them by name and summarize them as a group instead.
+_NOTE_COL_PATTERN = re.compile(
+    r"^\s*(review|comments?|fin review|finance weekly)\b", re.IGNORECASE
+)
+
+
+def _is_note_col(col: str) -> bool:
+    """True if a column is one of the dated weekly review/comment note columns."""
+    return bool(_NOTE_COL_PATTERN.match(col))
 
 # One in-memory connection for the whole process. ":memory:" means the database
 # lives in RAM and vanishes when the process exits — perfect for a cache/query
@@ -65,26 +79,61 @@ def run_sql(sql: str):
     return _con.execute(sql).df()
 
 
-def get_schema_text(sample_values: int = 4) -> str:
-    """
-    Build a human-readable description of the table for the system prompt:
-    every column name plus a few example values. The agent reads this to know
-    what columns exist and what the data looks like BEFORE writing any SQL.
+def _sample_str(df, col: str, n: int) -> str:
+    """A few distinct, non-empty example values for a column, single-lined."""
+    vals = df[col].astype(str)
+    samples = []
+    for v in vals.unique():
+        v = " ".join(str(v).split())          # collapse newlines/whitespace
+        if v:
+            samples.append(v[:40])            # trim very long note cells
+        if len(samples) >= n:
+            break
+    return ", ".join(f"'{s}'" for s in samples) if samples else "(mostly empty)"
 
-    Example output line:
-        - "Status" (text) — e.g. 'UAT', 'Live', 'Delayed', 'In Progress'
+
+def get_schema_text(sample_values: int = 3) -> str:
+    """
+    Build a human-readable description of the table for the system prompt.
+
+    Splits columns into two groups so the prompt stays focused:
+    1. CORE columns — listed in full with example values. These are what most
+       questions are about (status, partner, dates, owners, efforts, risk).
+    2. DATED NOTE columns — ~90 'Review <date>' / 'Comments <date>' free-text
+       columns. We don't list each one (it would bury the core columns); we
+       summarize them and list their names compactly so the agent knows they
+       exist and can query a specific date when asked.
     """
     _ensure_table()
     df = get_new_vision_df()
 
-    lines = [f'Table name: "{TABLE_NAME}"  ({len(df)} rows)', "", "Columns:"]
-    for col in df.columns:
-        # A few distinct, non-empty example values so the agent writes filters
-        # that match the REAL data (e.g. 'UAT' not 'In UAT').
-        vals = df[col].astype(str)
-        samples = [v for v in vals.unique() if v.strip()][:sample_values]
-        sample_str = ", ".join(f"'{s}'" for s in samples) if samples else "(empty)"
-        lines.append(f'  - "{col}" (text) — e.g. {sample_str}')
+    core_cols = [c for c in df.columns if not _is_note_col(c)]
+    note_cols = [c for c in df.columns if _is_note_col(c)]
+
+    lines = [
+        f'Table name: "{TABLE_NAME}"  ({len(df)} rows, {len(df.columns)} columns total)',
+        "",
+        "CORE columns (use these for almost all questions):",
+    ]
+    for col in core_cols:
+        lines.append(f'  - "{col}" - e.g. {_sample_str(df, col, sample_values)}')
+
+    if note_cols:
+        # We deliberately DO NOT list all ~90 names here — that bloats every LLM
+        # call. We give a couple of examples and tell the agent how to discover
+        # the exact name on demand (via information_schema) when a question
+        # actually needs a specific dated note column.
+        examples = ", ".join(f'"{c}"' for c in note_cols[:4])
+        lines += [
+            "",
+            f"DATED NOTE columns: there are also {len(note_cols)} free-text weekly "
+            f"review/meeting-note columns (e.g. {examples}), one per review date, "
+            "mostly empty per row. Only use them when the user asks what was "
+            "discussed/updated on a SPECIFIC date. To find the exact column name "
+            "for a date, run: SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{TABLE_NAME}' AND column_name ILIKE '%<date>%'.",
+        ]
+
     return "\n".join(lines)
 
 

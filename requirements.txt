@@ -1,0 +1,20 @@
+# Core agent framework
+strands-agents[litellm]
+strands-agents-tools
+
+# Model access (LiteLLM speaks to both Groq and OpenAI)
+litellm
+
+# Google Sheets
+gspread
+google-auth
+
+# Query engine + data handling
+duckdb
+pandas
+
+# Web UI
+chainlit
+
+# Config
+python-dotenv
