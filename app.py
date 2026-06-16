@@ -88,16 +88,34 @@ async def on_message(message: cl.Message):
     # Remember where the conversation was, so we can find THIS turn's SQL after.
     start_idx = len(agent.messages)
 
-    async with cl.Step(name="Querying the tracker…") as step:
-        try:
-            result = await asyncio.to_thread(agent, message.content)
-            answer = answer_text(result)
-            step.output = "Done."
-        except Exception as e:
-            answer = f"Sorry, something went wrong: {e}"
-            step.output = "Error."
+    # Stream the answer token-by-token. We create an empty message and push tokens
+    # into it as the model writes, so the user reads the answer as it forms instead
+    # of waiting for the whole thing.
+    #
+    # agent.stream_async() runs the FULL agent loop (it may call query_tracker /
+    # find_entity along the way) and yields events. Two keys matter to us:
+    #   - "data"   → a chunk of the assistant's visible answer text (stream it)
+    #   - "result" → the final AgentResult (used only as a fallback)
+    # Tool-call steps happen between text, during which no "data" arrives — that's
+    # the brief "thinking" gap before the answer starts flowing.
+    msg = cl.Message(content="")
+    await msg.send()
 
-    await cl.Message(content=answer).send()
+    final_result = None
+    try:
+        async for event in agent.stream_async(message.content):
+            if "data" in event:
+                await msg.stream_token(event["data"])
+            elif "result" in event:
+                final_result = event["result"]
+    except Exception as e:
+        await msg.stream_token(f"\n\nSorry, something went wrong: {e}")
+
+    # Fallback: if nothing streamed as "data" (rare), fill from the final result.
+    if not msg.content and final_result is not None:
+        msg.content = answer_text(final_result)
+
+    await msg.update()
 
     # Show the exact SQL the agent ran, in a collapsible side element, so the
     # user can audit how the answer was produced.
