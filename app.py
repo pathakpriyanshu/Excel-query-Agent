@@ -18,27 +18,6 @@ from agents import create_agent, answer_text, MODEL_PROVIDER
 from loader import get_new_vision_df
 
 
-def _sql_calls_since(agent, start_idx: int):
-    """
-    Collect the SQL strings the agent ran during the latest turn, so we can show
-    the user "here's exactly what I queried" (transparency builds CEO trust).
-
-    Strands keeps the full conversation in agent.messages. A tool call shows up
-    as a content block with a "toolUse" entry. We scan only the messages added
-    after start_idx (i.e. this turn).
-    """
-    sqls = []
-    for msg in agent.messages[start_idx:]:
-        for block in msg.get("content", []) or []:
-            if isinstance(block, dict) and "toolUse" in block:
-                tool_use = block["toolUse"]
-                if tool_use.get("name") == "query_tracker":
-                    sql = tool_use.get("input", {}).get("sql")
-                    if sql:
-                        sqls.append(sql)
-    return sqls
-
-
 @cl.on_chat_start
 async def on_chat_start():
     """Runs once when a user opens the chat. Build + cache the agent here."""
@@ -84,9 +63,6 @@ async def on_message(message: cl.Message):
         await asyncio.to_thread(get_new_vision_df, True)  # force_refresh=True
         await cl.Message(content="✅ Pulled the latest data from the sheet.").send()
         return
-
-    # Remember where the conversation was, so we can find THIS turn's SQL after.
-    start_idx = len(agent.messages)
 
     # We stream the agent's run into ONE message. While it's still working (tool
     # calls + reasoning) we show a ChatGPT-style status line in that message; the
@@ -167,13 +143,3 @@ async def on_message(message: cl.Message):
         msg.content = answer_text(final_result)
 
     await msg.update()
-
-    # Show the exact SQL the agent ran, in a collapsible side element, so the
-    # user can audit how the answer was produced.
-    sqls = _sql_calls_since(agent, start_idx)
-    if sqls:
-        joined = "\n\n".join(f"```sql\n{s}\n```" for s in sqls)
-        await cl.Message(
-            content="",
-            elements=[cl.Text(name="SQL I ran", content=joined, display="side")],
-        ).send()
