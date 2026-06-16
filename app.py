@@ -88,31 +88,82 @@ async def on_message(message: cl.Message):
     # Remember where the conversation was, so we can find THIS turn's SQL after.
     start_idx = len(agent.messages)
 
-    # Stream the answer token-by-token. We create an empty message and push tokens
-    # into it as the model writes, so the user reads the answer as it forms instead
-    # of waiting for the whole thing.
+    # We stream the agent's run into ONE message. While it's still working (tool
+    # calls + reasoning) we show a ChatGPT-style status line in that message; the
+    # moment the real answer starts arriving, we clear the status and stream the
+    # answer in token-by-token.
     #
-    # agent.stream_async() runs the FULL agent loop (it may call query_tracker /
-    # find_entity along the way) and yields events. Two keys matter to us:
-    #   - "data"   → a chunk of the assistant's visible answer text (stream it)
-    #   - "result" → the final AgentResult (used only as a fallback)
-    # Tool-call steps happen between text, during which no "data" arrives — that's
-    # the brief "thinking" gap before the answer starts flowing.
+    # agent.stream_async() runs the FULL agent loop and yields events. The keys we
+    # care about:
+    #   "current_tool_use" → the model is calling a tool (name + toolUseId)
+    #   "start"            → a new reasoning cycle began (e.g. after a tool result)
+    #   "data"            → a chunk of the visible answer text
+    #   "result"          → the final AgentResult (fallback only)
     msg = cl.Message(content="")
     await msg.send()
 
+    # Status text per tool the agent calls (no emojis — these get the animated
+    # shimmer sweep via the .thinking-shimmer CSS class in public/custom.css).
+    TOOL_LABELS = {
+        "find_entity": "Matching the name",
+        "query_tracker": "Querying the tracker",
+    }
+
+    def shimmer(text: str) -> str:
+        # Wrap the status in a span our custom CSS animates. Requires
+        # unsafe_allow_html = true in .chainlit/config.toml.
+        return f'<span class="thinking-shimmer">{text}</span>'
+
+    current_status = None
+
+    async def set_status(label: str):
+        # Update the status line only when it actually changes (avoids needless
+        # re-renders / flicker).
+        nonlocal current_status
+        if label != current_status:
+            current_status = label
+            msg.content = shimmer(label)
+            await msg.update()
+
+    await set_status("Thinking")
+
     final_result = None
+    answer_started = False
+    seen_tools = set()
+    tools_ran = 0
+
     try:
         async for event in agent.stream_async(message.content):
             if "data" in event:
+                # The visible answer has begun → clear the status once, then stream.
+                if not answer_started:
+                    answer_started = True
+                    msg.content = ""
+                    await msg.update()
                 await msg.stream_token(event["data"])
+
+            elif "current_tool_use" in event and not answer_started:
+                tu = event["current_tool_use"]
+                tid, name = tu.get("toolUseId"), tu.get("name")
+                if tid and name and tid not in seen_tools:
+                    seen_tools.add(tid)
+                    tools_ran += 1
+                    await set_status(TOOL_LABELS.get(name, "Working"))
+
+            elif "start" in event and tools_ran and not answer_started:
+                # Model resumed after a tool result → it's interpreting the data.
+                await set_status("Almost there — analyzing the results")
+
             elif "result" in event:
                 final_result = event["result"]
     except Exception as e:
+        if not answer_started:
+            msg.content = ""
         await msg.stream_token(f"\n\nSorry, something went wrong: {e}")
 
-    # Fallback: if nothing streamed as "data" (rare), fill from the final result.
-    if not msg.content and final_result is not None:
+    # Fallback: if no answer text ever streamed (rare), replace the status line
+    # with the final result so the user never sees a stuck "Thinking" shimmer.
+    if not answer_started and final_result is not None:
         msg.content = answer_text(final_result)
 
     await msg.update()
