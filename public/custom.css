@@ -1,10 +1,6 @@
-/* Animated "shimmer" status text — the light sweep that moves across the word,
-   like the thinking indicator in modern LLM chat UIs. Applied to status lines
-   while the agent is working (see app.py -> shimmer()). */
+/* Animated shimmer status text shown while the agent is working. */
 
 .thinking-shimmer {
-  /* A mostly-grey gradient with a bright band in the middle. We animate the
-     band's position so it sweeps left<->right across the text. */
   background: linear-gradient(
     90deg,
     rgba(140, 140, 150, 0.55) 0%,
@@ -15,7 +11,6 @@
   );
   background-size: 200% 100%;
 
-  /* Clip the gradient to the shape of the text so only the letters are painted. */
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;

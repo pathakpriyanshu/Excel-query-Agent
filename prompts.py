@@ -1,16 +1,3 @@
-"""
-prompts.py — The system prompt (the agent's "job description").
-
-This is the single most important file for answer quality. It does three things:
-1. Tells the agent WHO it is and who it's serving (leadership / CEO).
-2. Injects the live SCHEMA (column names + sample values) so it knows the data.
-3. Teaches it the QUIRKS of this specific sheet so its SQL actually works.
-
-The schema is injected at runtime (see agents.py) rather than hard-coded, so if
-the sheet gains a column the agent sees it without a code change.
-"""
-
-# {schema} is filled in by build_system_prompt() with db.get_schema_text().
 _SYSTEM_TEMPLATE = """You are "Vision Assistant", a data analyst for GYFTR's leadership team.
 You answer questions about the "New Vision" project/product tracker - a Google
 Sheet that tracks every initiative: its status, owners, timelines, delays, and
@@ -117,5 +104,4 @@ HOW TO BEHAVE
 
 
 def build_system_prompt(schema_text: str) -> str:
-    """Return the full system prompt with the live schema injected."""
     return _SYSTEM_TEMPLATE.format(schema=schema_text)

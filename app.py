@@ -1,16 +1,3 @@
-"""
-app.py — Chainlit web UI for the Vision Assistant.
-
-The one critical detail (this is why we discussed cl.user_session):
-the agent is created ONCE in on_chat_start and stored in the session, then
-REUSED on every message. If we created a new Agent() inside on_message, it would
-forget everything between turns. Storing the instance keeps Strands' built-in
-conversation memory alive for the whole chat.
-
-We run the (synchronous) agent inside asyncio.to_thread so the agent's LLM/SQL
-work doesn't block Chainlit's async event loop (which would freeze the UI).
-"""
-
 import asyncio
 import chainlit as cl
 
@@ -20,25 +7,19 @@ from loader import get_new_vision_df
 
 @cl.on_chat_start
 async def on_chat_start():
-    """Runs once when a user opens the chat. Build + cache the agent here."""
-    # Warm the data cache up front so the first question is fast, and so a bad
-    # credential/sheet shows an error immediately rather than mid-conversation.
     try:
         df = await asyncio.to_thread(get_new_vision_df)
         rows = len(df)
     except Exception as e:
-        await cl.Message(
-            content=f"⚠️ Could not load the tracker: {e}"
-        ).send()
+        await cl.Message(content=f"⚠️ Could not load the tracker: {e}").send()
         return
 
-    # Create the agent ONCE and stash it in the per-user session.
     agent = await asyncio.to_thread(create_agent)
     cl.user_session.set("agent", agent)
 
     await cl.Message(
         content=(
-            f"Hi! I'm **Vision Assistant** — I answer questions about the "
+            f"Hi! I'm **Personal Assistant** — I answer questions about the "
             f"**New Vision** tracker ({rows} initiatives). Model: `{MODEL_PROVIDER}`.\n\n"
             "Ask me things like:\n"
             "- *How many projects are delayed, and why?*\n"
@@ -58,43 +39,25 @@ async def on_message(message: cl.Message):
         ).send()
         return
 
-    # Manual refresh command.
     if message.content.strip().lower() == "refresh":
-        await asyncio.to_thread(get_new_vision_df, True)  # force_refresh=True
+        await asyncio.to_thread(get_new_vision_df, True)
         await cl.Message(content="✅ Pulled the latest data from the sheet.").send()
         return
 
-    # We stream the agent's run into ONE message. While it's still working (tool
-    # calls + reasoning) we show a ChatGPT-style status line in that message; the
-    # moment the real answer starts arriving, we clear the status and stream the
-    # answer in token-by-token.
-    #
-    # agent.stream_async() runs the FULL agent loop and yields events. The keys we
-    # care about:
-    #   "current_tool_use" → the model is calling a tool (name + toolUseId)
-    #   "start"            → a new reasoning cycle began (e.g. after a tool result)
-    #   "data"            → a chunk of the visible answer text
-    #   "result"          → the final AgentResult (fallback only)
     msg = cl.Message(content="")
     await msg.send()
 
-    # Status text per tool the agent calls (no emojis — these get the animated
-    # shimmer sweep via the .thinking-shimmer CSS class in public/custom.css).
     TOOL_LABELS = {
         "find_entity": "Matching the name",
         "query_tracker": "Querying the tracker",
     }
 
     def shimmer(text: str) -> str:
-        # Wrap the status in a span our custom CSS animates. Requires
-        # unsafe_allow_html = true in .chainlit/config.toml.
         return f'<span class="thinking-shimmer">{text}</span>'
 
     current_status = None
 
     async def set_status(label: str):
-        # Update the status line only when it actually changes (avoids needless
-        # re-renders / flicker).
         nonlocal current_status
         if label != current_status:
             current_status = label
@@ -111,7 +74,6 @@ async def on_message(message: cl.Message):
     try:
         async for event in agent.stream_async(message.content):
             if "data" in event:
-                # The visible answer has begun → clear the status once, then stream.
                 if not answer_started:
                     answer_started = True
                     msg.content = ""
@@ -127,7 +89,6 @@ async def on_message(message: cl.Message):
                     await set_status(TOOL_LABELS.get(name, "Working"))
 
             elif "start" in event and tools_ran and not answer_started:
-                # Model resumed after a tool result → it's interpreting the data.
                 await set_status("Almost there — analyzing the results")
 
             elif "result" in event:
@@ -137,8 +98,6 @@ async def on_message(message: cl.Message):
             msg.content = ""
         await msg.stream_token(f"\n\nSorry, something went wrong: {e}")
 
-    # Fallback: if no answer text ever streamed (rare), replace the status line
-    # with the final result so the user never sees a stuck "Thinking" shimmer.
     if not answer_started and final_result is not None:
         msg.content = answer_text(final_result)
 

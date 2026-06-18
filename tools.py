@@ -1,34 +1,17 @@
-"""
-tools.py — The agent's one tool: run SQL against the New Vision tracker.
-
-A Strands tool is just a Python function decorated with @tool. Two things matter:
-1. The TYPE HINTS — they tell the model what arguments to pass (here: one string).
-2. The DOCSTRING — the model literally reads it to decide WHEN and HOW to call
-   the tool. So the docstring below is written for the model, not for us.
-
-The tool returns a plain string (a small text table or an error message). When
-the SQL is wrong, we return the error text instead of raising — that lets the
-agent read its own mistake and fix the query on the next turn (self-correction).
-"""
-
 from strands import tool
-from db import run_sql, find_entity_candidates, TABLE_NAME
+from db import run_sql, find_entity_candidates
 
-# Safety caps so one query can never flood the model's context with huge output.
-# (Also keeps us under Groq's free-tier tokens-per-minute limit.)
-MAX_ROWS = 25          # rows returned to the agent
-MAX_CELL_CHARS = 220   # characters per cell (note columns can be paragraphs)
+MAX_ROWS = 25
+MAX_CELL_CHARS = 220
 
 
 def _format_dataframe(df) -> str:
-    """Turn a result DataFrame into a compact, readable text table for the agent."""
     if df is None or df.empty:
         return "Query ran successfully but returned 0 rows."
 
     total = len(df)
     shown = df.head(MAX_ROWS).copy()
 
-    # Trim very long cell values (the free-text note columns can be paragraphs).
     for col in shown.columns:
         shown[col] = shown[col].astype(str).apply(
             lambda v: (v[:MAX_CELL_CHARS] + "…") if len(v) > MAX_CELL_CHARS else v
@@ -59,9 +42,6 @@ def query_tracker(sql: str) -> str:
         The matching rows as a text table, or an error message if the SQL failed
         (in which case, fix the SQL and call this tool again).
     """
-    # Guard rail: this tool is read-only. Reject anything that isn't a plain
-    # SELECT/WITH query so a malformed (or unexpected) statement can't mutate
-    # anything. The DuckDB connection is in-memory anyway, but defence in depth.
     stripped = sql.strip().rstrip(";").lstrip("(").strip().lower()
     if not (stripped.startswith("select") or stripped.startswith("with")):
         return (
@@ -73,7 +53,6 @@ def query_tracker(sql: str) -> str:
         result_df = run_sql(sql)
         return _format_dataframe(result_df)
     except Exception as e:
-        # Hand the exact error back to the model so it can self-correct.
         return f"ERROR running query: {type(e).__name__}: {e}\nFix the SQL and try again."
 
 
@@ -101,12 +80,9 @@ def find_entity(term: str) -> str:
             f"line-of-business columns. It may genuinely not be in the tracker."
         )
 
-    # matches are (value, column, similarity, coverage), best first.
     top_val, top_col, top_sim, top_cov = matches[0]
     second_cov = matches[1][3] if len(matches) > 1 else -1
 
-    # Clear winner: only one match, or the top one matched more of the user's
-    # words than the runner-up. Tell the agent it can use it directly.
     if len(matches) == 1 or top_cov > second_cov:
         msg = [f'Best match for "{term}": "{top_val}" (in "{top_col}"). Use this.']
         if len(matches) > 1:
@@ -114,7 +90,6 @@ def find_entity(term: str) -> str:
             msg.append(f"(Other, weaker possibilities: {others}.)")
         return "\n".join(msg)
 
-    # Genuine tie -> list the top options so the agent can ask the user.
     lines = [f'Several equally close matches for "{term}" - ask the user which:']
     for val, col, score, _cov in matches[:5]:
         lines.append(f'  - "{val}"  (in "{col}")')

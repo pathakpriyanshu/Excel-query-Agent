@@ -1,6 +1,13 @@
 .env
 .claude/
 .venv/
+venv/
 __pycache__/
 .chainlit
 .vercel
+.vite/
+.understand-anything
+chainlit.md
+
+# Google service-account key — never commit secrets
+*.json
