@@ -1,0 +1,21 @@
+# Python
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Secrets — must NEVER be baked into the image
+.env
+google_credentials.json
+*credentials*.json
+
+# Local / VCS / platform junk
+.git/
+.gitignore
+.vercel/
+.files/
+*.log
+
+# Docs not needed at runtime (keep chainlit.md — it's the welcome screen)
+DEPLOY.md

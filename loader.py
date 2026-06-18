@@ -3,6 +3,8 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 import os
+import json
+import base64
 import time
 
 load_dotenv()
@@ -22,9 +24,31 @@ _CACHE = {
 }
 
 
-def get_google_client():
+def _load_credentials() -> Credentials:
+    # Production: full service-account JSON passed as an env var
+    # (raw JSON or base64-encoded). Preferred for Docker / DigitalOcean.
+    raw = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if raw:
+        raw = raw.strip()
+        try:
+            info = json.loads(raw)
+        except json.JSONDecodeError:
+            info = json.loads(base64.b64decode(raw).decode("utf-8"))
+        return Credentials.from_service_account_info(info, scopes=SCOPES)
+
+    # Local dev: path to the JSON file on disk.
     creds_path = os.getenv("GOOGLE_CREDENTIALS_PATH")
-    creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+    if creds_path:
+        return Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+
+    raise RuntimeError(
+        "No Google credentials found. Set GOOGLE_CREDENTIALS_JSON (production) "
+        "or GOOGLE_CREDENTIALS_PATH (local dev)."
+    )
+
+
+def get_google_client():
+    creds = _load_credentials()
     return gspread.authorize(creds)
 
 

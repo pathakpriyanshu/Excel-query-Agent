@@ -1,13 +1,19 @@
+# Secrets — NEVER commit these
 .env
-.claude/
+*.json
+
+# Python
 .venv/
 venv/
 __pycache__/
-.chainlit
-.vercel
+
+# Chainlit runtime: keep config.toml + chainlit.md (committed),
+# ignore auto-generated translations and user uploads
+.chainlit/translations/
+.files/
+
+# Editors / tooling / other platforms
+.claude/
 .vite/
 .understand-anything
-chainlit.md
-
-# Google service-account key — never commit secrets
-*.json
+.vercel
