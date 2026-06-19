@@ -24,3 +24,126 @@
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Speech-to-text mic button + recording UI (see public/mic.js)      */
+/* ------------------------------------------------------------------ */
+
+:root {
+  --stt-accent: #ef4444; /* recording / waveform colour */
+}
+
+.stt-mic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.stt-mic-btn:hover {
+  opacity: 1;
+  background: rgba(140, 140, 150, 0.15);
+}
+
+.stt-mic-btn.stt-mic-floating {
+  position: absolute;
+  right: 48px;
+  bottom: 10px;
+  z-index: 5;
+}
+
+/* Recording: red, gently pulsing. */
+.stt-mic-btn.stt-recording {
+  color: var(--stt-accent);
+  opacity: 1;
+  animation: stt-pulse 1.2s ease-in-out infinite;
+}
+@keyframes stt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50%      { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+
+.stt-mic-btn.stt-loading {
+  opacity: 1;
+  cursor: default;
+}
+
+/* Spinner shown while transcribing. */
+.stt-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(140, 140, 150, 0.4);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: stt-spin 0.7s linear infinite;
+}
+@keyframes stt-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Floating bar with the live waveform, shown above the composer. */
+.stt-rec-bar {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(30, 30, 35, 0.92);
+  color: #f5f5f7;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(6px);
+}
+
+.stt-rec-bar .stt-wave {
+  flex: 1;
+  height: 40px;
+  min-width: 120px;
+}
+
+.stt-rec-bar .stt-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  opacity: 0.85;
+  min-width: 34px;
+  text-align: center;
+}
+
+.stt-rec-bar .stt-rec-stop {
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  background: var(--stt-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.stt-rec-bar .stt-rec-stop:hover {
+  filter: brightness(1.08);
+}
+
+.stt-rec-bar .stt-rec-cancel {
+  border: none;
+  background: transparent;
+  color: #f5f5f7;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 4px;
+}
+.stt-rec-bar .stt-rec-cancel:hover {
+  opacity: 1;
+}

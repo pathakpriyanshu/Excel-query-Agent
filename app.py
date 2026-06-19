@@ -4,6 +4,9 @@ import chainlit as cl
 from agents import create_agent, answer_text, MODEL_PROVIDER
 from loader import get_new_vision_df
 
+# Registers the POST /transcribe endpoint on Chainlit's FastAPI app (speech-to-text).
+import voice_api  # noqa: F401
+
 
 @cl.on_chat_start
 async def on_chat_start():
