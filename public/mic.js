@@ -156,10 +156,33 @@
     const bar = document.getElementById("stt-rec-bar");
     const input = findInput();
     if (!bar || !input) return;
-    const r = input.getBoundingClientRect();
-    bar.style.left = r.left + "px";
-    bar.style.width = r.width + "px";
-    bar.style.bottom = window.innerHeight - r.top + 8 + "px";
+
+    const vv = window.visualViewport;
+    const isMobile = window.innerWidth <= 600;
+
+    if (isMobile) {
+      // Span (almost) the full width and sit just above the on-screen
+      // keyboard. visualViewport tells us how much of the screen the
+      // keyboard is covering, so the bar never hides behind it.
+      const keyboardInset = vv
+        ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+        : 0;
+      bar.style.left = "8px";
+      bar.style.right = "8px";
+      bar.style.width = "auto";
+      bar.style.bottom = keyboardInset + 12 + "px";
+    } else {
+      const r = input.getBoundingClientRect();
+      bar.style.right = "auto";
+      bar.style.left = r.left + "px";
+      bar.style.width = r.width + "px";
+      bar.style.bottom = window.innerHeight - r.top + 8 + "px";
+    }
+
+    // Keep the waveform crisp by matching the canvas buffer to its
+    // rendered width.
+    const canvas = bar.querySelector(".stt-wave");
+    if (canvas && canvas.clientWidth) canvas.width = canvas.clientWidth;
   }
 
   function hideRecordingBar() {
@@ -263,6 +286,10 @@
     setButtonState("recording");
     showRecordingBar();
     window.addEventListener("resize", positionRecordingBar);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", positionRecordingBar);
+      window.visualViewport.addEventListener("scroll", positionRecordingBar);
+    }
   }
 
   function stopRecording() {
@@ -285,6 +312,10 @@
     hideRecordingBar();
     stopTimer();
     window.removeEventListener("resize", positionRecordingBar);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener("resize", positionRecordingBar);
+      window.visualViewport.removeEventListener("scroll", positionRecordingBar);
+    }
 
     const mimeType = (mediaRecorder && mediaRecorder.mimeType) || "audio/webm";
     cleanupStream();

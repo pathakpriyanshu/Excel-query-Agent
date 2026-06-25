@@ -147,3 +147,23 @@
 .stt-rec-bar .stt-rec-cancel:hover {
   opacity: 1;
 }
+
+/* Mobile: keep the recording bar inside the screen and let its parts
+   shrink so the waveform, timer and Stop button all stay visible. */
+@media (max-width: 600px) {
+  .stt-rec-bar {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .stt-rec-bar .stt-wave {
+    min-width: 40px;
+  }
+  .stt-rec-bar .stt-timer {
+    min-width: 30px;
+    font-size: 12px;
+  }
+  .stt-rec-bar .stt-rec-stop {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+}
